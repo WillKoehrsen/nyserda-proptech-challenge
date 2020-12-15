@@ -44,7 +44,7 @@ def read_raw_data():
         )
         tenant_data.to_csv(TENANT_DATA_CSV_NAME)
     else:
-        print("Tenant data found")
+        print("Tenant and meter lookup data found")
         tenant_data = pd.read_csv(TENANT_DATA_CSV_NAME, **date_time_read_settings)
         meter_lookup = pd.read_csv(METERS_CSV_NAME)
 
@@ -77,7 +77,7 @@ def read_raw_data():
 
 def prepare_data():
     """
-    Read in and create features for data.
+    Read in and create features from data.
     """
     data_dict = read_raw_data()
     meter_data, tenant_data, occupancy_data, steam_data, meter_lookup = (
