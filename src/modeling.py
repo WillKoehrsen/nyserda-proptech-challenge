@@ -188,10 +188,21 @@ all_feature_imps = (
 all_results = pd.concat(all_results_list)
 all_results["date"] = all_results.index.date
 
-all_results['mae'] = all_results['predicted'] - all_results['actual']
+all_results["mae"] = all_results["predicted"] - all_results["actual"]
 
 all_results = (
     all_results.reset_index(drop=False)
     .merge(occupancy_data.reset_index(drop=True), how="left", on="date")
     .set_index("date_time")
 )
+
+
+def calculate_corrected_mape(actual, predicted):
+    errors = predicted - actual
+    ape = errors / actual
+    ape[(actual == 0) & (predicted == 0)] = 0
+    ape[(actual == 0) & (predicted != 0)] = errors / actual.median()
+    return dict(
+        mpe=round(100 * ape.median(), 2), mape=round(100 * ape.abs().median(), 2)
+    )
+
