@@ -1,16 +1,25 @@
 import os
 import pandas as pd
+import numpy as np
 
 
-def get_datetime_info(df, date_col, timezone=None, drop=False):
+def get_datetime_info(
+    df, date_col, utc=False, timezone=None, drop=False, additional_attributes=False
+):
     """
     Extract date and time information from a column in dataframe
-    and add as new columns. Time zones are converted to local time if specified.
+    and add as new columns. If time is originally is UTC but local timezone is provided,
+    then features will be in local timezone.
 
     :param df: pandas dataframe
     :param date_col: string representing the column containing datetimes. Can also be 'index' to use the index
-    :param timezone: string for the time zone. If passed, times are converted to local
-    :param drop: boolean indicating whether the original column should be dropped from the df
+    :param utc: boolean for whether the timestamps in UTC
+    :param timezone: string for the time zone. If passed, times are converted to local.
+        A local timezone should only be passed if timestamps are originally in utc.
+    :param drop: boolean indicating whether the original column should be dropped from
+        the dataframe
+    :param additional_attributes: boolean for whether additional date attributes should
+        be extracted.
 
     :return df: dataframe with added date and time columns
     """
@@ -25,13 +34,13 @@ def get_datetime_info(df, date_col, timezone=None, drop=False):
         prefix = date_col
 
     # Make sure the field type is a datetime
-    if timezone is not None:
-        fld = pd.to_datetime(fld, utc=True)
-    else:
-        fld = pd.to_datetime(fld)
+    fld = pd.to_datetime(fld, utc=utc)
 
-    # Convert to local time and then remove time zone information
+    # If timezone originally in UTC but want in local time
     if timezone:
+        # Timestamps must originally be in UTC timezone
+        if not utc:
+            raise ValueError("Timestamps were not declared as UTC")
         fld = fld.dt.tz_convert(timezone).dt.tz_localize(None)
         df["local"] = fld
 
@@ -41,37 +50,54 @@ def get_datetime_info(df, date_col, timezone=None, drop=False):
     # Basic attributes
     attr = ["Year", "Month", "Day", "Dayofweek", "Dayofyear", "Date"]
 
-    # Additional attributes to extract
-    attr = attr + [
-        "Is_month_end",
-        "Is_month_start",
-        "Is_quarter_end",
-        "Is_quarter_start",
-        "Is_year_end",
-        "Is_year_start",
-    ]
+    if additional_attributes:
+        attr = attr + [
+            "Is_month_end",
+            "Is_month_start",
+            "Is_quarter_end",
+            "Is_quarter_start",
+            "Is_year_end",
+            "Is_year_start",
+        ]
 
     # Time attributes
     attr = attr + ["Hour", "Minute", "Second"]
 
     # Iterate through each attribute and add it to the dataframe
     for n in attr:
+        # The week or weekofyear attributes are deprecated, so must use
+        # isocalendar().week
         if n == "week":
             df[prefix + n] = getattr(fld.dt.isocalendar(), n.lower())
         else:
             df[prefix + n] = getattr(fld.dt, n.lower())
 
-    # Add fractional time of day
+    # Add fractional time of day by converting to hours
     df[prefix + "FracDay"] = (
         (df[prefix + "Hour"] / 24)
         + (df[prefix + "Minute"] / 60 / 24)
         + (df[prefix + "Second"] / 60 / 60 / 24)
     )
 
-    # Add fractional time of week
+    # Add fractional time of week by converting to hours
     df[prefix + "FracWeek"] = (
         (df[prefix + "Dayofweek"] * 24) + (df[prefix + "FracDay"] * 24)
     ) / (7 * 24)
+
+    # Add fractional time of month by converting to hours
+    df[prefix + "FracMonth"] = (
+        # First day of month is 1
+        ((df[prefix + "Day"] - 1) * 24) + (df[prefix + "FracDay"] * 24)
+    ) / (fld.dt.daysinmonth * 24)
+
+    # Add fractional time of year by converting to hours
+    df[prefix + "FracYear"] = (
+        # First day of year is 1
+        ((df[prefix + "Dayofyear"] - 1) * 24) + (df[prefix + "FracDay"] * 24)
+    ) / (np.where(fld.dt.is_leap_year, 366, 365) * 24)
+
+    # Add a trend which measures days since first measurement
+    df[prefix + "Trend"] = (fld - fld.min()) / pd.Timedelta(days=1)
 
     # Drop the column if specified
     if drop:
@@ -195,6 +221,11 @@ def prepare_data():
         .reset_index()
         .sort_values(by=["meter", "date_time"])
     ).set_index("date_time")
+
+    tenant_data = pd.concat(
+        [tenant_data, meter_data.assign(meter="building")], axis="rows"
+    )
+
     return dict(
         meter_data=meter_data,
         tenant_data=tenant_data,
