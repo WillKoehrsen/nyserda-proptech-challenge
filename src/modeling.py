@@ -10,68 +10,112 @@ from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
 
 from src.utils import prepare_data
 
-data_dict = prepare_data()
-
-occupancy_data = data_dict["occupancy_data"]
-
-# First date with greater than 50% reduction in occupancy from baseline (first obs)
-prediction_start_date = occupancy_data.index.date[
-    occupancy_data["baseline_change"] < -50
-][0]
-
-print(
-    f"The first day with greater than 50% reduction in occupancy is {prediction_start_date}."
-)
-
-tenant_usage_data = data_dict["tenant_data"]
-tenant_usage_data.head()
-
 # Percentage of training data used for validation
 VALIDATION_PERCENTAGE = 0.3
 
-validation_dates = (
-    tenant_usage_data.groupby("meter")
-    .apply(
-        lambda x: x[x["date"] < prediction_start_date]
-        .reset_index()["date_time"]
-        .astype("int64")
-        .quantile(1 - VALIDATION_PERCENTAGE)
+FEATURES_FILE = "data/modeling/features.csv"
+TARGETS_FILE = "data/modeling/targets.csv"
+
+
+def create_and_save_features_and_targets():
+    """
+    Create features and targets for machine learning from meter usage data.
+
+    Targets are consumption for each meter.
+    """
+    data_dict = prepare_data()
+    occupancy_data = data_dict["occupancy_data"]
+
+    # First date with greater than 50% reduction in occupancy from baseline (first obs)
+    prediction_start_date = occupancy_data.index.date[
+        occupancy_data["baseline_change"] < -50
+    ][0]
+
+    print(
+        f"The first day with greater than 50% reduction in occupancy is {prediction_start_date}."
     )
-    .astype("datetime64[ns]")
-    .dt.date
-).rename("validation_date")
 
-validation_dates
+    tenant_usage_data = data_dict["tenant_data"]
+    print("Tenant usage data head:\n\n", tenant_usage_data.head())
 
-# Assign training/validation/prediction label to data
-tenant_usage_data.loc[
-    tenant_usage_data["date"] >= prediction_start_date, "set"
-] = "prediction"
+    validation_dates = (
+        tenant_usage_data.groupby("meter")
+        .apply(
+            lambda x: x[x["date"] < prediction_start_date]
+            .reset_index()["date_time"]
+            .astype("int64")
+            .quantile(1 - VALIDATION_PERCENTAGE)
+        )
+        .astype("datetime64[ns]")
+        .dt.date
+    ).rename("validation_date")
 
-tenant_usage_data = tenant_usage_data.merge(
-    validation_dates, left_on="meter", right_index=True, how="left"
-)
+    print("Validation dates:\n\n", validation_dates)
 
-tenant_usage_data.loc[
-    (tenant_usage_data["date"] >= tenant_usage_data["validation_date"])
-    & (tenant_usage_data["date"] < prediction_start_date),
-    "set",
-] = "validation"
+    # Assign training/validation/prediction label to data
+    tenant_usage_data.loc[
+        tenant_usage_data["date"] >= prediction_start_date, "set"
+    ] = "prediction"
 
-tenant_usage_data.loc[
-    tenant_usage_data["date"] < tenant_usage_data["validation_date"], "set"
-] = "training"
+    tenant_usage_data = tenant_usage_data.merge(
+        validation_dates, left_on="meter", right_index=True, how="left"
+    )
 
-tenant_usage_data.groupby("meter")["set"].value_counts()
+    tenant_usage_data.loc[
+        (tenant_usage_data["date"] >= tenant_usage_data["validation_date"])
+        & (tenant_usage_data["date"] < prediction_start_date),
+        "set",
+    ] = "validation"
 
-target_cols = ["meter", "consumption", "max_demand", "min_demand", "avg_demand", "name"]
+    tenant_usage_data.loc[
+        tenant_usage_data["date"] < tenant_usage_data["validation_date"], "set"
+    ] = "training"
 
-# All feature columns
-feature_cols = list(
-    set(tenant_usage_data.columns)
-    - set(target_cols)
-    - set(["set", "date", "entries", "baseline_change", "validation_date"])
-)
+    print(
+        "Set value counts for each meter:\n\n",
+        tenant_usage_data.groupby("meter")["set"].value_counts(),
+    )
+
+    target_cols = [
+        "meter",
+        "consumption",
+        "max_demand",
+        "min_demand",
+        "avg_demand",
+        "name",
+    ]
+
+    # All feature columns
+    feature_cols = list(
+        set(tenant_usage_data.columns)
+        - set(target_cols)
+        - set(["set", "date", "entries", "baseline_change", "validation_date"])
+    )
+
+    # Get the features with set and meter columns for subsetting
+    features = tenant_usage_data[
+        feature_cols + ["set", "meter", "entries", "baseline_change"]
+    ].copy()
+
+    print("Features head:\n\n", features.head())
+
+    features.reset_index().drop_duplicates(subset=["date_time"]).drop(
+        columns=["set", "meter"]
+    ).to_csv(FEATURES_FILE, index=False)
+
+    # For the targets, each meter has its own column
+    targets = tenant_usage_data.pivot_table(
+        index=["date_time", "set"], values=["consumption"], columns=["meter"]
+    )
+    targets.columns = targets.columns.droplevel(0)
+
+    print("Targets head:\n\n", targets.head())
+
+    targets.reset_index().to_csv("data/modeling/targets.csv", index=False)
+
+    print(f"Features saved to {FEATURES_FILE}")
+    print(f"Targets saved to {TARGETS_FILE}")
+
 
 # Important features from random forest model
 important_features = [
@@ -85,39 +129,69 @@ important_features = [
 ]
 
 
-def model_with_features(feature_list):
+def read_features_and_targets():
+    """
+    Read in processed features and targets from files.
+
+    Returns:
+        features, targets: Pandas dataframes
+    """
+    return (
+        pd.read_csv(FEATURES_FILE, parse_dates=["date_time"]),
+        pd.read_csv(TARGETS_FILE, parse_dates=["date_time"]),
+    )
+
+
+features, targets = read_features_and_targets()
+
+
+def remove_time_gaps(targets, target_col):
+    """
+
+    Remove anomalous consumption measurements resulting from gaps in data.
+
+    Args:
+        targets ([type]): [description]
+        target_col ([type]): [description]
+    """
+    series = (
+        targets.set_index("date_time")[[target_col, "set"]].dropna(subset=[target_col])
+    ).sort_index()
+
+    series["time_diff"] = series.index.to_series().diff()
+    series["time_diff_minutes"] = series["time_diff"] / pd.Timedelta(minutes=1)
+
+    print(
+        "Time difference value counts:\n\n",
+        series["time_diff_minutes"].value_counts().sort_values(),
+    )
+
+    anomalous = series[series["time_diff"] != pd.Timedelta(minutes=15)]
+    new_series = series.drop(anomalous.index)
+    assert (new_series["time_diff"] == pd.Timedelta(minutes=15)).all()
+    return new_series[[target_col, "set"]].reset_index()
+
+
+def model_with_features(features, targets, feature_list):
     """
     Build a supervised regression model with the specified features.
     Returns the predictions for each meter and set.
     """
-    # Get the features with set and meter columns for subsetting
-    features = tenant_usage_data[feature_list + ["set", "meter"]].copy()
-
-    # For the targets, each meter has its own column
-    targets = tenant_usage_data.pivot_table(
-        index=["date_time", "set"], values=["consumption"], columns=["meter"]
-    )
-    targets.columns = targets.columns.droplevel(0)
-
-    targets.head()
-
     # Each meter forms one column of the targets (consumption values)
-    meter_cols = targets.columns
+    meter_cols = [
+        column for column in targets.columns if "-0" in column or column == "building"
+    ]
 
     all_feature_imps_list = []
     all_results_list = []
 
     for meter in tqdm.tqdm(meter_cols, desc="meters"):
+        meter_targets = remove_time_gaps(targets, target_col=meter)
         dataset = (
-            targets[[meter]].dropna()
+            meter_targets
             # Merge the targets with their respective features
-            .merge(
-                features[features["meter"] == meter],
-                left_index=True,
-                right_index=True,
-                how="left",
-            )
-        )
+            .merge(features, on="date_time", how="left",)
+        ).set_index("date_time")
 
         training_dataset = dataset[dataset["set"] == "training"]
 
@@ -151,6 +225,7 @@ def model_with_features(feature_list):
             .assign(meter=meter)
             .assign(set="validation")
         )
+
         prediction_df = (
             pd.DataFrame(
                 dict(predicted=predictions, actual=prediction_dataset[meter]),
@@ -183,17 +258,35 @@ def model_with_features(feature_list):
     return dict(all_results=all_results, all_feature_imps=all_feature_imps)
 
 
-results_dict = model_with_features(feature_list=feature_cols[:])
+def run_modeling():
+    new_results_dict = model_with_features(
+        features=features,
+        targets=targets,
+        feature_list=[
+            "date_time_FracYear",
+            "date_time_FracMonth",
+            "humidity",
+            "date_time_FracDay",
+            "temp",
+            "date_time_FracWeek",
+        ],
+    )
 
-all_results, all_feature_imps = (
-    results_dict["all_results"],
-    results_dict["all_feature_imps"],
-)
-all_results = (
-    all_results.reset_index(drop=False)
-    .merge(occupancy_data.reset_index(drop=True), how="left", on="date")
-    .set_index("date_time")
-)
+    new_all_results, new_all_feature_imps = (
+        new_results_dict["all_results"],
+        new_results_dict["all_feature_imps"],
+    )
+
+    new_scores_by_meter = new_all_results.groupby(["meter", "set"]).apply(
+        lambda x: calculate_corrected_mape(actual=x["actual"], predicted=x["predicted"])
+    )
+
+
+# all_results = (
+#     all_results.reset_index(drop=False)
+#     .merge(occupancy_data.reset_index(drop=True), how="left", on="date")
+#     .set_index("date_time")
+# )
 
 
 def calculate_corrected_mape(actual, predicted):
@@ -217,9 +310,4 @@ def calculate_corrected_mape(actual, predicted):
     mape = 100 * pe.abs().mean()
 
     return dict(mpe=round(mpe, 2), mape=round(mape, 2))
-
-
-scores_by_meter = all_results.groupby(["meter", "set"]).apply(
-    lambda x: calculate_corrected_mape(actual=x["actual"], predicted=x["predicted"])
-)
 
