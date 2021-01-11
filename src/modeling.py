@@ -42,6 +42,28 @@ def read_features_and_targets():
     )
 
 
+def plot_interpolated_series(comparison, meter_name):
+    fig = px.line(
+        comparison,
+        x="date_time",
+        y="consumption",
+        color="set",
+        template="presentation",
+        title=f"{meter_name}",
+    )
+    # Blue for interpolated
+    fig.data[0].mode = "lines+markers"
+    # Orange and transparent for original
+    fig.data[1].opacity = 0.1
+    plot(
+        fig,
+        auto_open=False,
+        show_link=True,
+        include_plotlyjs=False,
+        filename=f"./plots/{meter_name}_interpolation.html",
+    )
+
+
 def interpolate_zero_values(original_measurement_series):
     measurement_series = original_measurement_series.copy().dropna()
 
@@ -51,6 +73,22 @@ def interpolate_zero_values(original_measurement_series):
     measurement_series = measurement_series.replace({0: np.NaN})
 
     measurement_series = measurement_series.interpolate(method="time")
+
+    comparison = (
+        pd.concat(
+            [
+                measurement_series.rename("interpolated"),
+                original_measurement_series.rename("original"),
+            ],
+            axis="columns",
+        )
+        .reset_index()
+        .melt(id_vars=["date_time"], var_name="set", value_name="consumption")
+        .dropna()
+    )
+    meter_name = original_measurement_series.name
+    plot_interpolated_series(comparison, meter_name)
+
     return measurement_series
 
 
@@ -73,34 +111,14 @@ def create_targets(targets_from_file):
         id_vars=["date_time", "set"], value_name="consumption", var_name="meter"
     ).dropna()
 
-    pd.concat(
+    interpolated_values = pd.concat(
         [
-            interpolate_zero_values(targets.set_index("date_time")[[meter]])
+            interpolate_zero_values(targets.set_index("date_time")[meter])
             for meter in meter_cols
-        ], axis=1
+        ],
+        axis=1,
     )
-    for meter in meter_cols:
-        fig = px.line(
-            targets.dropna(subset=[meter]),
-            x="date_time",
-            y=meter,
-            title=f"{meter} Meter Consumption",
-            template="presentation",
-        )
-
-    fig = px.line(
-        melted,
-        x="date_time",
-        y="consumption",
-        facet_row="meter",
-        title="Consumption by Meter",
-        template="presentation",
-        height=1000 * melted["meter"].nunique(),
-    ).update_yaxes(matches=None)
-
-    plot(fig, filename="consumption_by_meter.html", show_link=True)
-
-    targets.loc[:, meter_cols] = meters[meters < TARGET_HIGH_LIMIT]
+    return interpolated_values
 
 
 def prepare():
