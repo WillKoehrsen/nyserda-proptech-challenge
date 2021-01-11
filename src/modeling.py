@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import tqdm
 
 import plotly.express as px
@@ -8,114 +9,13 @@ from datetime import date as create_date
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
 
-from src.utils import prepare_data
+from src.utils import (
+    remove_time_gaps,
+    FEATURES_FILE,
+    TARGETS_FILE,
+)
 
-# Percentage of training data used for validation
-VALIDATION_PERCENTAGE = 0.3
-
-FEATURES_FILE = "data/modeling/features.csv"
-TARGETS_FILE = "data/modeling/targets.csv"
-
-
-def create_and_save_features_and_targets():
-    """
-    Create features and targets for machine learning from meter usage data.
-
-    Targets are consumption for each meter.
-    """
-    data_dict = prepare_data()
-    occupancy_data = data_dict["occupancy_data"]
-
-    # First date with greater than 50% reduction in occupancy from baseline (first obs)
-    prediction_start_date = occupancy_data.index.date[
-        occupancy_data["baseline_change"] < -50
-    ][0]
-
-    print(
-        f"The first day with greater than 50% reduction in occupancy is {prediction_start_date}."
-    )
-
-    tenant_usage_data = data_dict["tenant_data"]
-    print("Tenant usage data head:\n\n", tenant_usage_data.head())
-
-    validation_dates = (
-        tenant_usage_data.groupby("meter")
-        .apply(
-            lambda x: x[x["date"] < prediction_start_date]
-            .reset_index()["date_time"]
-            .astype("int64")
-            .quantile(1 - VALIDATION_PERCENTAGE)
-        )
-        .astype("datetime64[ns]")
-        .dt.date
-    ).rename("validation_date")
-
-    print("Validation dates:\n\n", validation_dates)
-
-    # Assign training/validation/prediction label to data
-    tenant_usage_data.loc[
-        tenant_usage_data["date"] >= prediction_start_date, "set"
-    ] = "prediction"
-
-    tenant_usage_data = tenant_usage_data.merge(
-        validation_dates, left_on="meter", right_index=True, how="left"
-    )
-
-    tenant_usage_data.loc[
-        (tenant_usage_data["date"] >= tenant_usage_data["validation_date"])
-        & (tenant_usage_data["date"] < prediction_start_date),
-        "set",
-    ] = "validation"
-
-    tenant_usage_data.loc[
-        tenant_usage_data["date"] < tenant_usage_data["validation_date"], "set"
-    ] = "training"
-
-    print(
-        "Set value counts for each meter:\n\n",
-        tenant_usage_data.groupby("meter")["set"].value_counts(),
-    )
-
-    target_cols = [
-        "meter",
-        "consumption",
-        "max_demand",
-        "min_demand",
-        "avg_demand",
-        "name",
-    ]
-
-    # All feature columns
-    feature_cols = list(
-        set(tenant_usage_data.columns)
-        - set(target_cols)
-        - set(["set", "date", "entries", "baseline_change", "validation_date"])
-    )
-
-    # Get the features with set and meter columns for subsetting
-    features = tenant_usage_data[
-        feature_cols + ["set", "meter", "entries", "baseline_change"]
-    ].copy()
-
-    print("Features head:\n\n", features.head())
-
-    features.reset_index().drop_duplicates(subset=["date_time"]).drop(
-        columns=["set", "meter"]
-    ).to_csv(FEATURES_FILE, index=False)
-
-    # For the targets, each meter has its own column
-    targets = tenant_usage_data.pivot_table(
-        index=["date_time", "set"], values=["consumption"], columns=["meter"]
-    )
-    targets.columns = targets.columns.droplevel(0)
-
-    print("Targets head:\n\n", targets.head())
-
-    targets.reset_index().to_csv("data/modeling/targets.csv", index=False)
-
-    print(f"Features saved to {FEATURES_FILE}")
-    print(f"Targets saved to {TARGETS_FILE}")
-
+TARGET_HIGH_LIMIT = 1000
 
 # Important features from random forest model
 important_features = [
@@ -142,34 +42,91 @@ def read_features_and_targets():
     )
 
 
-features, targets = read_features_and_targets()
+def interpolate_zero_values(original_measurement_series):
+    measurement_series = original_measurement_series.copy().dropna()
+
+    zero_before = measurement_series.shift(1) == 0
+
+    measurement_series[zero_before] = np.NaN
+    measurement_series = measurement_series.replace({0: np.NaN})
+
+    measurement_series = measurement_series.interpolate(method="time")
+    return measurement_series
 
 
-def remove_time_gaps(targets, target_col):
-    """
-
-    Remove anomalous consumption measurements resulting from gaps in data.
-
-    Args:
-        targets ([type]): [description]
-        target_col ([type]): [description]
-    """
-    series = (
-        targets.set_index("date_time")[[target_col, "set"]].dropna(subset=[target_col])
-    ).sort_index()
-
-    series["time_diff"] = series.index.to_series().diff()
-    series["time_diff_minutes"] = series["time_diff"] / pd.Timedelta(minutes=1)
-
-    print(
-        "Time difference value counts:\n\n",
-        series["time_diff_minutes"].value_counts().sort_values(),
+def create_targets(targets_from_file):
+    targets = (
+        pd.concat(
+            [
+                remove_time_gaps(targets_from_file, target_col)
+                for target_col in targets_from_file.drop(
+                    columns=["date_time", "set"]
+                ).columns
+            ]
+        )
+        .pivot_table(index=["date_time", "set"])
+        .reset_index()
     )
+    meter_cols = targets.select_dtypes("number").columns
+    meters = targets[meter_cols].copy()
+    melted = targets.melt(
+        id_vars=["date_time", "set"], value_name="consumption", var_name="meter"
+    ).dropna()
 
-    anomalous = series[series["time_diff"] != pd.Timedelta(minutes=15)]
-    new_series = series.drop(anomalous.index)
-    assert (new_series["time_diff"] == pd.Timedelta(minutes=15)).all()
-    return new_series[[target_col, "set"]].reset_index()
+    pd.concat(
+        [
+            interpolate_zero_values(targets.set_index("date_time")[[meter]])
+            for meter in meter_cols
+        ], axis=1
+    )
+    for meter in meter_cols:
+        fig = px.line(
+            targets.dropna(subset=[meter]),
+            x="date_time",
+            y=meter,
+            title=f"{meter} Meter Consumption",
+            template="presentation",
+        )
+
+    fig = px.line(
+        melted,
+        x="date_time",
+        y="consumption",
+        facet_row="meter",
+        title="Consumption by Meter",
+        template="presentation",
+        height=1000 * melted["meter"].nunique(),
+    ).update_yaxes(matches=None)
+
+    plot(fig, filename="consumption_by_meter.html", show_link=True)
+
+    targets.loc[:, meter_cols] = meters[meters < TARGET_HIGH_LIMIT]
+
+
+def prepare():
+    """
+    Get data ready for modeling
+
+    Returns:
+        [type]: [description]
+    """
+    features, targets_from_file = read_features_and_targets()
+    targets = create_targets(targets_from_file)
+    targets = (
+        pd.concat(
+            [
+                remove_time_gaps(targets, target_col)
+                for target_col in targets.drop(columns=["date_time", "set"]).columns
+            ]
+        )
+        .pivot_table(index=["date_time", "set"])
+        .reset_index()
+    )
+    fig = px.line(
+        targets, x="date_time", y=targets.drop(columns=["set", "date_time"]).columns
+    )
+    plot(fig, filename="targets.html")
+    return features, targets
 
 
 def model_with_features(features, targets, feature_list):
@@ -190,7 +147,11 @@ def model_with_features(features, targets, feature_list):
         dataset = (
             meter_targets
             # Merge the targets with their respective features
-            .merge(features, on="date_time", how="left",)
+            .merge(
+                features,
+                on="date_time",
+                how="left",
+            )
         ).set_index("date_time")
 
         training_dataset = dataset[dataset["set"] == "training"]
@@ -310,4 +271,3 @@ def calculate_corrected_mape(actual, predicted):
     mape = 100 * pe.abs().mean()
 
     return dict(mpe=round(mpe, 2), mape=round(mape, 2))
-

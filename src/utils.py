@@ -2,6 +2,138 @@ import os
 import pandas as pd
 import numpy as np
 
+# Percentage of training data used for validation
+VALIDATION_PERCENTAGE = 0.3
+
+FEATURES_FILE = "data/modeling/features.csv"
+TARGETS_FILE = "data/modeling/targets.csv"
+
+
+def create_and_save_features_and_targets():
+    """
+    Create features and targets for machine learning from meter usage data.
+
+    Targets are consumption for each meter.
+    """
+    data_dict = prepare_data()
+    occupancy_data = data_dict["occupancy_data"]
+
+    # First date with greater than 50% reduction in occupancy from baseline (first obs)
+    prediction_start_date = occupancy_data.index.date[
+        occupancy_data["baseline_change"] < -50
+    ][0]
+
+    print(
+        f"The first day with greater than 50% reduction in occupancy is {prediction_start_date}."
+    )
+
+    tenant_usage_data = data_dict["tenant_data"]
+    print("Tenant usage data head:\n\n", tenant_usage_data.head())
+
+    validation_dates = (
+        tenant_usage_data.groupby("meter")
+        .apply(
+            lambda x: x[x["date"] < prediction_start_date]
+            .reset_index()["date_time"]
+            .astype("int64")
+            .quantile(1 - VALIDATION_PERCENTAGE)
+        )
+        .astype("datetime64[ns]")
+        .dt.date
+    ).rename("validation_date")
+
+    print("Validation dates:\n\n", validation_dates)
+
+    # Assign training/validation/prediction label to data
+    tenant_usage_data.loc[
+        tenant_usage_data["date"] >= prediction_start_date, "set"
+    ] = "prediction"
+
+    tenant_usage_data = tenant_usage_data.merge(
+        validation_dates, left_on="meter", right_index=True, how="left"
+    )
+
+    tenant_usage_data.loc[
+        (tenant_usage_data["date"] >= tenant_usage_data["validation_date"])
+        & (tenant_usage_data["date"] < prediction_start_date),
+        "set",
+    ] = "validation"
+
+    tenant_usage_data.loc[
+        tenant_usage_data["date"] < tenant_usage_data["validation_date"], "set"
+    ] = "training"
+
+    print(
+        "Set value counts for each meter:\n\n",
+        tenant_usage_data.groupby("meter")["set"].value_counts(),
+    )
+
+    target_cols = [
+        "meter",
+        "consumption",
+        "max_demand",
+        "min_demand",
+        "avg_demand",
+        "name",
+    ]
+
+    # All feature columns
+    feature_cols = list(
+        set(tenant_usage_data.columns)
+        - set(target_cols)
+        - set(["set", "date", "entries", "baseline_change", "validation_date"])
+    )
+
+    # Get the features with set and meter columns for subsetting
+    features = tenant_usage_data[
+        feature_cols + ["set", "meter", "entries", "baseline_change"]
+    ].copy()
+
+    print("Features head:\n\n", features.head())
+
+    features.reset_index().drop_duplicates(subset=["date_time"]).drop(
+        columns=["set", "meter"]
+    ).to_csv(FEATURES_FILE, index=False)
+
+    # For the targets, each meter has its own column
+    targets = tenant_usage_data.pivot_table(
+        index=["date_time", "set"], values=["consumption"], columns=["meter"]
+    )
+    targets.columns = targets.columns.droplevel(0)
+
+    print("Targets head:\n\n", targets.head())
+
+    targets.reset_index().to_csv("data/modeling/targets.csv", index=False)
+
+    print(f"Features saved to {FEATURES_FILE}")
+    print(f"Targets saved to {TARGETS_FILE}")
+
+
+def remove_time_gaps(targets, target_col):
+    """
+
+    Remove anomalous consumption measurements resulting from gaps in data.
+
+    Args:
+        targets ([type]): [description]
+        target_col ([type]): [description]
+    """
+    series = (
+        targets.set_index("date_time")[[target_col, "set"]].dropna(subset=[target_col])
+    ).sort_index()
+
+    series["time_diff"] = series.index.to_series().diff()
+    series["time_diff_minutes"] = series["time_diff"] / pd.Timedelta(minutes=1)
+
+    # print(
+    #     "Time difference value counts:\n\n",
+    #     series["time_diff_minutes"].value_counts().sort_values(),
+    # )
+
+    anomalous = series[series["time_diff"] != pd.Timedelta(minutes=15)]
+    new_series = series.drop(anomalous.index)
+    assert (new_series["time_diff"] == pd.Timedelta(minutes=15)).all()
+    return new_series[[target_col, "set"]].reset_index()
 
 def get_datetime_info(
     df, date_col, utc=False, timezone=None, drop=False, additional_attributes=False
@@ -87,13 +219,15 @@ def get_datetime_info(
     # Add fractional time of month by converting to hours
     df[prefix + "FracMonth"] = (
         # First day of month is 1
-        ((df[prefix + "Day"] - 1) * 24) + (df[prefix + "FracDay"] * 24)
+        ((df[prefix + "Day"] - 1) * 24)
+        + (df[prefix + "FracDay"] * 24)
     ) / (fld.dt.daysinmonth * 24)
 
     # Add fractional time of year by converting to hours
     df[prefix + "FracYear"] = (
         # First day of year is 1
-        ((df[prefix + "Dayofyear"] - 1) * 24) + (df[prefix + "FracDay"] * 24)
+        ((df[prefix + "Dayofyear"] - 1) * 24)
+        + (df[prefix + "FracDay"] * 24)
     ) / (np.where(fld.dt.is_leap_year, 366, 365) * 24)
 
     # Add a trend which measures days since first measurement
