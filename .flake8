@@ -1,0 +1,13 @@
+# flake8 configuration file. https://flake8.pycqa.org/en/latest/user/configuration.html
+# Single errors can be ignored on lines with # noqa: ERROR_CODE (such as # noqa: E712)
+
+[flake8]
+show-source = True
+# Match the line length used by Black
+max-line-length = 88
+# Ignore line length errors, bare excepts, and whitespace before colons in all files
+extend-ignore = E501, E722, E203
+# Ignore unused imports and redefinitions in tests because of pytest fixtures
+# that must be imported but are not explicitly used.
+per-file-ignores =
+	./tests/*:F401, F811
