@@ -59,20 +59,23 @@ def plot_interpolated_series(comparison, meter_name):
         fig,
         auto_open=False,
         show_link=True,
-        include_plotlyjs=False,
+        include_plotlyjs=True,
         filename=f"./plots/{meter_name}_interpolation.html",
     )
 
 
-def interpolate_zero_values(original_measurement_series):
+def interpolate_zero_values(original_measurement_series, plot=False):
     measurement_series = original_measurement_series.copy().dropna()
-
     zero_before = measurement_series.shift(1) == 0
+    above_limit = measurement_series >= TARGET_HIGH_LIMIT
 
+    # Replace values immediately after a zero with a NaN
     measurement_series[zero_before] = np.NaN
-    measurement_series = measurement_series.replace({0: np.NaN})
+    measurement_series[above_limit] = np.NaN
 
-    measurement_series = measurement_series.interpolate(method="time")
+    measurement_series = measurement_series.replace({0: np.NaN}).interpolate(
+        method="time"
+    )
 
     comparison = (
         pd.concat(
@@ -87,12 +90,14 @@ def interpolate_zero_values(original_measurement_series):
         .dropna()
     )
     meter_name = original_measurement_series.name
-    plot_interpolated_series(comparison, meter_name)
+
+    if plot:
+        plot_interpolated_series(comparison, meter_name)
 
     return measurement_series
 
 
-def create_targets(targets_from_file):
+def create_targets(targets_from_file, plot=False):
     targets = (
         pd.concat(
             [
@@ -105,15 +110,12 @@ def create_targets(targets_from_file):
         .pivot_table(index=["date_time", "set"])
         .reset_index()
     )
+
     meter_cols = targets.select_dtypes("number").columns
-    meters = targets[meter_cols].copy()
-    melted = targets.melt(
-        id_vars=["date_time", "set"], value_name="consumption", var_name="meter"
-    ).dropna()
 
     interpolated_values = pd.concat(
         [
-            interpolate_zero_values(targets.set_index("date_time")[meter])
+            interpolate_zero_values(targets.set_index("date_time")[meter], plot=plot)
             for meter in meter_cols
         ],
         axis=1,
@@ -130,20 +132,6 @@ def prepare():
     """
     features, targets_from_file = read_features_and_targets()
     targets = create_targets(targets_from_file)
-    targets = (
-        pd.concat(
-            [
-                remove_time_gaps(targets, target_col)
-                for target_col in targets.drop(columns=["date_time", "set"]).columns
-            ]
-        )
-        .pivot_table(index=["date_time", "set"])
-        .reset_index()
-    )
-    fig = px.line(
-        targets, x="date_time", y=targets.drop(columns=["set", "date_time"]).columns
-    )
-    plot(fig, filename="targets.html")
     return features, targets
 
 
