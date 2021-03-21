@@ -1,4 +1,5 @@
 import os
+
 import pandas as pd
 
 from src.utils import prepare_data
@@ -40,4 +41,3 @@ def preliminary():
     daily_tenant_sums_pivoted.merge(
         occupancy_data, left_index=True, right_index=True
     ).corr()
-
