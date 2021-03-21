@@ -1,20 +1,15 @@
-from datetime import date as create_date
-from datetime import timedelta
-
-import numpy as np
 import pandas as pd
 import plotly.express as px
-import tqdm
+
 from plotly.offline import plot
-from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+
 
 from src.constants import (
     COVID_START_DATE,
     DATE_READ_SETTINGS,
     DATE_TIME_READ_SETTINGS,
     DEFAULT_FEATURES,
-    FEATURES_TARGET_CSV_NAME,
     FINAL_TEST_PREDICTIONS_CSV_NAME,
     OCCUPANCY_DATA_CSV_NAME,
     RANDOM_FOREST_HYPERPARAMETERS,
@@ -23,8 +18,6 @@ from src.constants import (
     TESTING_DATE,
     VALIDATION_DATE_COUNT,
 )
-from src.feature_engineering import OCCUPANCY_DATA_CSV_NAME
-from src.parsing import DATE_READ_SETTINGS
 
 
 def train_and_predict(training_dataset, validation_dataset, features=DEFAULT_FEATURES):
