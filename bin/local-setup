@@ -1,0 +1,9 @@
+#!/bin/sh
+# Install pipenv for managing packages
+pip3 install pipenv==2020.11.15
+
+# Install all requirements (including dev)
+pipenv install --dev
+
+# Install the package inside the virtual environment
+pipenv run pip3 install -e .

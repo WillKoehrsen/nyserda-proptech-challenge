@@ -42,7 +42,7 @@ if __name__ == "__main__":
             height=row_count * 450,
             facet_row="meter",
             template="presentation",
-            title="Comparison of Forecasted Consumption to Prior Monday Consumption",
+            title="Comparison of Forecasted Consumption to Average Monday During Covid Consumption",
             labels=dict(forecasted_consumption="consumption"),
         )
         .update_yaxes(matches=None)

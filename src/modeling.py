@@ -16,40 +16,6 @@ from src.constants import (
     TESTING_DATE,
     VALIDATION_DATE_COUNT,
 )
-from src.feature_engineering import (
-    create_dataset_from_csvs,
-    create_features_and_targets,
-)
-from src.parsing import read_raw_excel_data_to_csv
-
-
-def prepare_data():
-    """
-    Get the data ready for modeling and analysis.
-    """
-    print("Reading data from Excel to csvs")
-    read_raw_excel_data_to_csv()
-    print("Creating dataset from csvs")
-    create_dataset_from_csvs()
-    print("Creating features and targets")
-    create_features_and_targets()
-    print("Features and targets ready for modeling!")
-
-
-def train_and_predict(training_dataset, validation_dataset, features=DEFAULT_FEATURES):
-    """
-    Train a machine learning model on the training dataset and predict on the
-    validation dataset.
-    """
-    estimator = RandomForestRegressor(n_estimators=20, max_depth=10, n_jobs=-1).fit(
-        training_dataset[features], training_dataset[TARGET]
-    )
-
-    predictions = validation_dataset.assign(
-        predicted=estimator.predict(validation_dataset[features])
-    ).rename(columns={TARGET: "actual"})
-
-    return predictions
 
 
 def make_test_predictions(
@@ -60,9 +26,11 @@ def make_test_predictions(
     save_predictions=True,
 ):
     """
-    Make test predictions for each tenant meter.
+    Make test predictions for each tenant meter. Use the provided features and limit to
+    covid-only data if specified.
     """
     testing_dataset = pd.read_csv(TEST_DATASET_CSV_NAME, **DATE_TIME_READ_SETTINGS)
+
     feature_importances = []
     test_predictions = []
 
@@ -98,6 +66,7 @@ def make_test_predictions(
         )
 
     test_predictions = pd.concat(test_predictions)
+
     if save_predictions:
         test_predictions[test_predictions["meter"] != "Building"].to_csv(
             FINAL_TEST_PREDICTIONS_CSV_NAME
@@ -108,12 +77,15 @@ def make_test_predictions(
 
     if return_features:
         return test_predictions, feature_importances
+
     return test_predictions
 
 
 def occupancy_consumption_correlation(features_and_targets):
     """
-    Find the correlation between building-wide occupancy and tenant consumption
+    Find the correlations between building-wide occupancy and tenant consumption.
+    Calculates the correlation by the percentage relative change and the
+    correlation coefficient (Pearsons).
     """
     occupancy = pd.read_csv(OCCUPANCY_DATA_CSV_NAME, **DATE_READ_SETTINGS)
 
@@ -183,14 +155,14 @@ def occupancy_consumption_correlation(features_and_targets):
     )
 
     print(
-        f"\n\nOverall Pearson's Correlation between occupancy and consumption: {round(daily_corr_by_meter.median(), 2)}"
+        f"\n\nOverall Pearson's Correlation between occupancy and consumption: {round(daily_corr_by_meter.median(), 4)}"
     )
 
     print(
         f"\n\n{'#' * 12}\tPercentage change in consumption to percentage change in occupancy\t{'#' * 12}{consumption_to_occupancy_change_by_meter}"
     )
 
-    overall_change = round(consumption_to_occupancy_change_by_meter.median(), 2)
+    overall_change = round(consumption_to_occupancy_change_by_meter.median(), 4)
 
     print(f"\n\nOverall change in consumption to change in occupancy: {overall_change}")
 
@@ -213,6 +185,8 @@ def one_day_ahead_rolling_validation(
     predictions of the consumption on that date, which we can compare to the true value.
     """
     predictions = []
+
+    estimator = RandomForestRegressor(**RANDOM_FOREST_HYPERPARAMETERS)
 
     print(f"\n\n{'#' * 12}\tRunning One Day Ahead Validation\t{'#' * 12}")
 
@@ -251,9 +225,12 @@ def one_day_ahead_rolling_validation(
                 meter_features_and_target["date"] == validation_date
             ]
 
-            date_predictions = train_and_predict(
-                training_dataset, validation_dataset
-            ).assign(training_data_count=len(training_dataset))
+            estimator.fit(training_dataset[features], training_dataset[TARGET])
+
+            date_predictions = validation_dataset.assign(
+                predicted=estimator.predict(validation_dataset[features]),
+                training_data_count=len(training_dataset),
+            ).rename(columns={TARGET: "actual"})
 
             meter_predictions.append(
                 date_predictions[
@@ -266,7 +243,7 @@ def one_day_ahead_rolling_validation(
         mae, mape = calculate_mae_and_mape(pd.concat(meter_predictions))
 
         print(
-            f"{meter}: Mean Absolute Error: {round(mae, 2)} Median Absolute Percentage Error: {round(mape, 2)}%"
+            f"{meter}: Mean Absolute Error: {round(mae, 4)} Median Absolute Percentage Error: {round(mape, 4)}%"
         )
 
     return pd.concat(predictions)
@@ -275,52 +252,62 @@ def one_day_ahead_rolling_validation(
 def process_validation_predictions(predictions):
     """
     Analyze the results from running next-day-ahead validation.
-    Calculate the median percentage error of the model.
+    Calculate the Median Absolute Percentage Error (MAPE) and
+    Median Absolute Percentage Error (MAE) of the model.
     """
     predictions = predictions.copy()
     predictions["error"] = predictions["actual"] - predictions["predicted"]
 
-    mape_by_meter = (
+    metrics_by_meter = (
         predictions.groupby("meter")
         .apply(lambda x: calculate_mae_and_mape(x))
         .reset_index()
     )
 
-    mape_by_meter[["mae", "mape"]] = mape_by_meter.loc[:, 0].values.tolist()
-    mape_by_meter = mape_by_meter.drop(columns=0)
+    metrics_by_meter[["mae", "mape"]] = metrics_by_meter.loc[:, 0].values.tolist()
+    metrics_by_meter = metrics_by_meter.drop(columns=0)
 
     print(
-        f"\n\n{'#'*12}\tMean Absolute and Median Percentage Errors by Meter\t{'#'*12}\n\n{mape_by_meter.round(2)}"
+        f"\n\n{'#'*12}\tMean Absolute and Median Percentage Errors by Meter\t{'#'*12}\n\n{metrics_by_meter.round(4)}"
     )
-    print(f"\n\nOverall Mean Absolute Error: {round(mape_by_meter['mae'].median(), 2)}")
-    print(f"Overall Percentage Error: {round(mape_by_meter['mape'].median(), 2)}%")
+    print(
+        f"\n\nOverall Mean Absolute Error: {round(metrics_by_meter['mae'].median(), 4)}"
+    )
+    print(f"Overall Percentage Error: {round(metrics_by_meter['mape'].median(), 4)}%")
 
-    return mape_by_meter
+    return metrics_by_meter
 
 
 def calculate_mae_and_mape(predictions):
     """
-    Calculate the mean absolute error and the median
-    absolute percentage error.
+    Calculate the mean absolute error (MAE) and the median
+    absolute percentage error (MAPE).
     """
     predicted = predictions["predicted"]
     actual = predictions["actual"]
 
     absolute_errors = (predicted - actual).abs()
-    mae = absolute_errors.mean()
+    mean_absolute_error = absolute_errors.mean()
 
     # The percentage error is undefined when the actual measurement is 0.
-    pe = absolute_errors / actual
-    pe = pe[actual != 0]
+    percentage_error = absolute_errors / actual
+    percentage_error = percentage_error[actual != 0]
 
-    mape = 100 * pe.abs().median()
+    # Take the absolute value after dividing to have all positive metrics
+    mean_absolute_percentage_error = 100 * percentage_error.abs().median()
 
-    return mae, mape
+    return mean_absolute_error, mean_absolute_percentage_error
 
 
 def compute_efficiency_for_occupancy(features_and_targets, features=DEFAULT_FEATURES):
     """
-    Determine the efficiency of different reductions in occupancy.
+    Determine the efficiency of different reductions in occupancy. Works by comparing
+    the predicted consumption on the date, from a model trained on all pre-covid data,
+    to the actual consumption.
+
+    The efficiency is measured as the reduction in consumption from the predicted to the
+    actual. The model trains on weather, time of year, day of week, and additional
+    variables, so the predictions are normalized across these variables.
     """
     occupancy = pd.read_csv(OCCUPANCY_DATA_CSV_NAME, **DATE_READ_SETTINGS)
     estimator = RandomForestRegressor(**RANDOM_FOREST_HYPERPARAMETERS)
@@ -330,7 +317,6 @@ def compute_efficiency_for_occupancy(features_and_targets, features=DEFAULT_FEAT
         meter_data = meter_data.dropna(subset=features + [TARGET])
 
         training_data = meter_data[meter_data["date"] < COVID_START_DATE]
-
         testing_data = meter_data[meter_data["date"] >= COVID_START_DATE]
 
         estimator.fit(training_data[features], training_data[TARGET])
@@ -376,61 +362,66 @@ def compute_efficiency_for_occupancy(features_and_targets, features=DEFAULT_FEAT
         ]
         .median()
         .assign(
-            occupancy_change=lambda x: x["baseline_change"] * -1,
-            consumption_change=lambda x: x["percent_difference"] * -1,
+            # Convert to positive to represent a reduction in occupancy
+            occupancy_reduction=lambda x: x["baseline_change"] * -1,
+            consumption_reduction=lambda x: x["percent_difference"] * -1,
         )
     ).merge(occupancy, left_index=True, right_index=True)
 
     print(f"\n\n{'#' * 12}\tMost Efficient Reductions in Occupancy\t{'#' * 12}\n\n")
-    print(daily_comparison.nlargest(8, "occupancy_change_consumption_change"))
+    print(daily_comparison.nlargest(8, "consumption_reduction"))
+
+    daily_comparison["size"] = daily_comparison["occupancy_reduction"] ** (1 / 2)
 
     change_scatter_fig = px.scatter(
-        daily_comparison.round(2),
-        x="occupancy_change",
-        y="consumption_change",
+        daily_comparison.round(4),
+        x="occupancy_reduction",
+        y="consumption_reduction",
         hover_data=["entries"],
         title="Reduction in Consumption vs Reduction in Occupancy",
         opacity=0.6,
-        size="occupancy_change_consumption_change",
+        size="size",
+        size_max=40,
         template="presentation",
         labels=dict(
-            occupancy_change="Reduction in Occupancy",
-            consumption_change="Reduction in Consumption",
+            occupancy_reduction="Reduction in Occupancy",
+            consumption_reduction="Reduction in Consumption",
         ),
         trendline="ols",
     )
 
     plot(
         change_scatter_fig,
-        filename="plots/occupancy_change_vs_consumption_change_scatter.html",
+        filename="plots/consumption_change_vs_occupancy_change_scatter.html",
     )
 
-    daily_comparison["size"] = daily_comparison["occupancy_change"] ** 2
-
     efficiency_scatter_fig = px.scatter(
-        daily_comparison.round(2).reset_index().rename(columns=dict(index="date")),
+        daily_comparison.round(4).reset_index().rename(columns=dict(index="date")),
         x="date",
-        y="occupancy_change_consumption_change",
-        title="Energy Efficiency During Covid Reduction in Occupancy",
+        y="consumption_reduction",
+        title="Energy Efficiency and Reduction in Occupancy During Covid Timeframe",
         size="size",
         template="presentation",
-        size_max=30,
-        color="occupancy_change",
+        size_max=40,
+        color="occupancy_reduction",
         color_continuous_scale="Turbo",
         labels=dict(
             date="",
-            occupancy_change_consumption_change="Efficiency",
-            occupancy_change="Reduction in Occupancy",
+            consumption_reduction="Efficiency",
+            occupancy_reduction="Reduction in Occupancy",
         ),
     )
 
-    plot(efficiency_scatter_fig, filename="plots/efficiency_by_date_scatter.html")
+    plot(
+        efficiency_scatter_fig,
+        filename="plots/energy_efficiency_over_time_scatter.html",
+    )
 
 
-def plot_consumption_before_and_with_covid(features_and_targets):
+def plot_consumption_before_and_during_covid(features_and_targets):
     """
     Plot the average consumption before covid with the average
-    consumption during covid.
+    consumption during covid over a week.
     """
     features_and_targets.loc[
         features_and_targets["date"] >= COVID_START_DATE, "set"
@@ -489,4 +480,7 @@ def plot_consumption_before_and_with_covid(features_and_targets):
         .update_xaxes(showticklabels=True, nticks=20)
     )
 
-    plot(line_fig, filename="before_during_weekly_comparison.html")
+    plot(
+        line_fig,
+        filename="plots/consumption_before_covid_during_covid_week_comparison.html",
+    )

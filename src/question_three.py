@@ -30,4 +30,4 @@ if __name__ == "__main__":
         labels=dict(meter="Tenant Meter", mae="Mean Absolute Error (kWh)"),
     ).update_layout(dict(font=dict(size=26)))
 
-    plot(metric_bar_plot, filename="plots/mae_bar_plot.html")
+    plot(metric_bar_plot, filename="plots/mean_absolute_error_by_meter_bar_plot.html")

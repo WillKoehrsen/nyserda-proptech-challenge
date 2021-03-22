@@ -1,0 +1,7 @@
+#!/bin/sh
+pipenv run python src/process_data.py
+pipenv run python src/question_one.py
+pipenv run python src/question_two.py
+pipenv run python src/question_three.py
+pipenv run python src/question_four.py
+pipenv run python src/question_five.py
