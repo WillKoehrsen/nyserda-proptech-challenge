@@ -17,7 +17,3 @@ repos:
       - id: flake8
         args: [--statistics]
         description: Lint Python files
-  - repo: https://gitlab.com/iamlikeme/nbhooks
-    rev: 1.0.0  # Set to the most recent version
-    hooks:
-      - id: nb-ensure-clean
