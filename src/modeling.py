@@ -8,6 +8,7 @@ from src.constants import (
     DATE_READ_SETTINGS,
     DATE_TIME_READ_SETTINGS,
     DEFAULT_FEATURES,
+    EFFICIENT_DAYS_CSV_NAME,
     FINAL_TEST_PREDICTIONS_CSV_NAME,
     OCCUPANCY_DATA_CSV_NAME,
     RANDOM_FOREST_HYPERPARAMETERS,
@@ -370,6 +371,10 @@ def compute_efficiency_for_occupancy(features_and_targets, features=DEFAULT_FEAT
 
     print(f"\n\n{'#' * 12}\tMost Efficient Reductions in Occupancy\t{'#' * 12}\n\n")
     print(daily_comparison.nlargest(8, "consumption_reduction"))
+
+    daily_comparison.nlargest(10, "consumption_reduction")[
+        "consumption_reduction"
+    ].reset_index().rename(columns=dict(index="date")).to_csv(EFFICIENT_DAYS_CSV_NAME)
 
     daily_comparison["size"] = daily_comparison["occupancy_reduction"] ** (1 / 2)
 

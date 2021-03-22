@@ -12,6 +12,7 @@ DATASET_CSV_NAME = "data/modeling/dataset.csv"
 FEATURES_TARGET_CSV_NAME = "data/modeling/features_targets.csv"
 TEST_DATASET_CSV_NAME = "data/modeling/test_dataset.csv"
 FINAL_TEST_PREDICTIONS_CSV_NAME = "data/modeling/forecasted_consumption.csv"
+EFFICIENT_DAYS_CSV_NAME = "data/modeling/most_efficient_days.csv"
 
 # params for reading in daily data or interval data
 DATE_READ_SETTINGS = dict(parse_dates=["date"], index_col="date")
