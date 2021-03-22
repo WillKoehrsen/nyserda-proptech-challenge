@@ -1,5 +1,11 @@
 #!/bin/sh
-pipenv run python src/process_data.py
+while [ ! $# -eq 0 ]; do
+  case $1 in
+    --process-data) pipenv run python src/process_data.py;;
+  esac
+  shift
+done
+
 pipenv run python src/question_one.py
 pipenv run python src/question_two.py
 pipenv run python src/question_three.py
