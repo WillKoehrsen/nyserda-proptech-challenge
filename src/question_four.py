@@ -1,14 +1,16 @@
+import datetime as dt
+
 import pandas as pd
 import plotly.express as px
 from plotly.offline import plot
 
 from src.constants import EFFICIENT_DAYS_CSV_NAME, FINAL_PARAMETERS
 from src.feature_engineering import read_features_and_targets
-from src.modeling import make_test_predictions
+from src.modeling import compute_efficiency_for_occupancy, make_test_predictions
 
 if __name__ == "__main__":
     print(
-        f"{'#'*12}\tQuestion 4. What feature(s)/predictor(s) were most important in determining energy efficiency?\t{'#'*12}"
+        f"\n\n{'#'*12}\tQuestion 4. What feature(s)/predictor(s) were most important in determining energy efficiency?\t{'#'*12}"
     )
 
     features_and_targets = read_features_and_targets()
@@ -48,11 +50,20 @@ if __name__ == "__main__":
         title="Importance of Variables",
     ).update_xaxes(categoryorder="total descending")
 
-    plot(feature_plot, filename="plots/feature_values.html")
+    plot(feature_plot, show_link=True, filename="plots/feature_values.html")
+
+    predictions = compute_efficiency_for_occupancy(
+        features_and_targets, make_plots=False
+    )
 
     efficient_days = list(
         pd.read_csv(EFFICIENT_DAYS_CSV_NAME, parse_dates=["date"])["date"].dt.date
     )
+    efficient_days = [
+        dt.date(2020, 6, 9),
+        dt.date(2020, 6, 10),
+        dt.date(2020, 6, 11),
+    ]
     row_count = predictions["meter"].nunique()
 
     predictions["date"] = predictions.index.date
@@ -64,8 +75,9 @@ if __name__ == "__main__":
             y=["predicted", "actual"],
             facet_row="meter",
             height=row_count * 800,
-            title="Predicted vs Actual Covid Consumption",
+            title="Most Efficient Days Predicted vs Actual Covid Consumption",
             template="presentation",
+            labels=dict(predicted="Predicted", actual="Actual", variable=""),
         )
         .update_yaxes(matches=None)
         .update_xaxes(showticklabels=True)
@@ -73,5 +85,6 @@ if __name__ == "__main__":
 
     plot(
         prediction_fig,
+        show_link=True,
         filename="plots/efficient_days_predictions_and_actual_during_covid_consumption_line_plot.html",
     )

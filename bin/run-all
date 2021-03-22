@@ -1,9 +1,11 @@
 #!/bin/sh
-while [ ! $# -eq 0 ]; do
-  case $1 in
-    --process-data) pipenv run python src/process_data.py;;
+while true; do
+  read -p "Do you want to process the data? (Only necessary if not run yet) " yn
+  case $yn in
+    [Yy]* ) pipenv run python src/process_data.py; break;;
+    [Nn]* ) break;;
+    * ) echo "Options are Yes|No";;
   esac
-  shift
 done
 
 pipenv run python src/question_one.py

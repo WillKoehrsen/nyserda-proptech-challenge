@@ -300,7 +300,9 @@ def calculate_mae_and_mape(predictions):
     return mean_absolute_error, mean_absolute_percentage_error
 
 
-def compute_efficiency_for_occupancy(features_and_targets, features=DEFAULT_FEATURES):
+def compute_efficiency_for_occupancy(
+    features_and_targets, features=DEFAULT_FEATURES, make_plots=True
+):
     """
     Determine the efficiency of different reductions in occupancy. Works by comparing
     the predicted consumption on the date, from a model trained on all pre-covid data,
@@ -353,74 +355,81 @@ def compute_efficiency_for_occupancy(features_and_targets, features=DEFAULT_FEAT
         predictions["percent_difference"] / predictions["baseline_change"]
     )
 
-    daily_comparison = (
-        predictions.groupby(predictions.index.date)[
-            [
-                "baseline_change",
-                "percent_difference",
-                "occupancy_change_consumption_change",
+    if make_plots:
+        daily_comparison = (
+            predictions.groupby(predictions.index.date)[
+                [
+                    "baseline_change",
+                    "percent_difference",
+                    "occupancy_change_consumption_change",
+                ]
             ]
-        ]
-        .median()
-        .assign(
-            # Convert to positive to represent a reduction in occupancy
-            occupancy_reduction=lambda x: x["baseline_change"] * -1,
-            consumption_reduction=lambda x: x["percent_difference"] * -1,
+            .median()
+            .assign(
+                # Convert to positive to represent a reduction in occupancy
+                occupancy_reduction=lambda x: x["baseline_change"] * -1,
+                consumption_reduction=lambda x: x["percent_difference"] * -1,
+            )
+        ).merge(occupancy, left_index=True, right_index=True)
+
+        print(f"\n\n{'#' * 12}\tMost Efficient Reductions in Occupancy\t{'#' * 12}\n\n")
+        print(daily_comparison.nlargest(8, "consumption_reduction"))
+
+        daily_comparison.nlargest(10, "consumption_reduction")[
+            "consumption_reduction"
+        ].reset_index().rename(columns=dict(index="date")).to_csv(
+            EFFICIENT_DAYS_CSV_NAME
         )
-    ).merge(occupancy, left_index=True, right_index=True)
 
-    print(f"\n\n{'#' * 12}\tMost Efficient Reductions in Occupancy\t{'#' * 12}\n\n")
-    print(daily_comparison.nlargest(8, "consumption_reduction"))
+        daily_comparison["size"] = daily_comparison["occupancy_reduction"] ** (1 / 2)
 
-    daily_comparison.nlargest(10, "consumption_reduction")[
-        "consumption_reduction"
-    ].reset_index().rename(columns=dict(index="date")).to_csv(EFFICIENT_DAYS_CSV_NAME)
+        change_scatter_fig = px.scatter(
+            daily_comparison.round(4),
+            x="occupancy_reduction",
+            y="consumption_reduction",
+            hover_data=["entries"],
+            title="Reduction in Consumption vs Reduction in Occupancy",
+            opacity=0.6,
+            size="size",
+            size_max=40,
+            template="presentation",
+            labels=dict(
+                occupancy_reduction="Reduction in Occupancy",
+                consumption_reduction="Reduction in Consumption",
+            ),
+            trendline="ols",
+        )
 
-    daily_comparison["size"] = daily_comparison["occupancy_reduction"] ** (1 / 2)
+        plot(
+            change_scatter_fig,
+            show_link=True,
+            filename="plots/consumption_change_vs_occupancy_change_scatter.html",
+        )
 
-    change_scatter_fig = px.scatter(
-        daily_comparison.round(4),
-        x="occupancy_reduction",
-        y="consumption_reduction",
-        hover_data=["entries"],
-        title="Reduction in Consumption vs Reduction in Occupancy",
-        opacity=0.6,
-        size="size",
-        size_max=40,
-        template="presentation",
-        labels=dict(
-            occupancy_reduction="Reduction in Occupancy",
-            consumption_reduction="Reduction in Consumption",
-        ),
-        trendline="ols",
-    )
+        efficiency_scatter_fig = px.scatter(
+            daily_comparison.round(4).reset_index().rename(columns=dict(index="date")),
+            x="date",
+            y="consumption_reduction",
+            title="Energy Efficiency and Reduction in Occupancy During Covid Timeframe",
+            size="size",
+            template="presentation",
+            size_max=40,
+            color="occupancy_reduction",
+            color_continuous_scale="Turbo",
+            labels=dict(
+                date="",
+                consumption_reduction="Efficiency",
+                occupancy_reduction="Reduction in Occupancy",
+            ),
+        )
 
-    plot(
-        change_scatter_fig,
-        filename="plots/consumption_change_vs_occupancy_change_scatter.html",
-    )
-
-    efficiency_scatter_fig = px.scatter(
-        daily_comparison.round(4).reset_index().rename(columns=dict(index="date")),
-        x="date",
-        y="consumption_reduction",
-        title="Energy Efficiency and Reduction in Occupancy During Covid Timeframe",
-        size="size",
-        template="presentation",
-        size_max=40,
-        color="occupancy_reduction",
-        color_continuous_scale="Turbo",
-        labels=dict(
-            date="",
-            consumption_reduction="Efficiency",
-            occupancy_reduction="Reduction in Occupancy",
-        ),
-    )
-
-    plot(
-        efficiency_scatter_fig,
-        filename="plots/energy_efficiency_over_time_scatter.html",
-    )
+        plot(
+            efficiency_scatter_fig,
+            show_link=True,
+            filename="plots/energy_efficiency_over_time_scatter.html",
+        )
+    else:
+        return predictions
 
 
 def plot_consumption_before_and_during_covid(features_and_targets):
@@ -476,16 +485,23 @@ def plot_consumption_before_and_during_covid(features_and_targets):
             y="consumption",
             color="set",
             facet_row="meter",
-            title="Before vs During Covid Consumption",
-            height=row_count * 750,
+            title="Before Covid vs During Covid Consumption",
+            height=row_count * 500,
             template="presentation",
-            labels=dict(week_time="", consumption="Consumption"),
+            labels=dict(
+                before="Before Covid",
+                covid="Covid",
+                set="",
+                week_time="",
+                consumption="Consumption (kWh)",
+            ),
         )
         .update_yaxes(matches=None)
-        .update_xaxes(showticklabels=True, nticks=20)
+        .update_xaxes(showticklabels=True, nticks=21)
     )
 
     plot(
         line_fig,
+        show_link=True,
         filename="plots/consumption_before_covid_during_covid_week_comparison.html",
     )

@@ -20,6 +20,7 @@ psutil = "*"
 black = "==20.8b1"
 flake8 = "*"
 pre-commit = "*"
+chart-studio = "*"
 
 [requires]
 python_version = "3.8"

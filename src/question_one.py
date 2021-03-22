@@ -8,14 +8,14 @@ from src.modeling import make_test_predictions
 
 if __name__ == "__main__":
     print(
-        f"{'#'*12}\tQuestion 1. What is your forecasted consumption across all 18 tenant usage meters for the 24 hours of 8/31/20 in 15 minute intervals (1728 predictions)?\t{'#'*12}"
+        f"\n\n{'#'*12}\tQuestion 1. What is your forecasted consumption across all 18 tenant usage meters for the 24 hours of 8/31/20 in 15 minute intervals (1728 predictions)?\t{'#'*12}"
     )
 
     features_and_targets = read_features_and_targets()
 
     predictions = make_test_predictions(
         features_and_targets, **FINAL_PARAMETERS
-    ).assign(set="Forecast")
+    ).assign(set="Forecast 2020-08-31")
 
     monday_data = (
         features_and_targets[
@@ -39,14 +39,20 @@ if __name__ == "__main__":
             x="date_time",
             y="forecasted_consumption",
             color="set",
-            height=row_count * 450,
+            height=row_count * 500,
             facet_row="meter",
             template="presentation",
-            title="Comparison of Forecasted Consumption to Average Monday During Covid Consumption",
-            labels=dict(forecasted_consumption="consumption"),
+            title="Comparison of Forecasted Consumption for Monday 2020-08-31 to Average Monday During Covid Consumption",
+            labels=dict(
+                forecasted_consumption="Consumption (kWh)", date_time="", set=""
+            ),
         )
         .update_yaxes(matches=None)
         .update_xaxes(showticklabels=True)
     )
 
-    plot(comparison_fig, filename="plots/forecasted_consumption_comparison.html")
+    plot(
+        comparison_fig,
+        show_link=True,
+        filename="plots/forecasted_consumption_comparison.html",
+    )
