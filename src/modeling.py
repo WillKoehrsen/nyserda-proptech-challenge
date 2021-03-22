@@ -439,10 +439,10 @@ def plot_consumption_before_and_during_covid(features_and_targets):
     """
     features_and_targets.loc[
         features_and_targets["date"] >= COVID_START_DATE, "set"
-    ] = "covid"
+    ] = "Covid"
     features_and_targets.loc[
         features_and_targets["date"] < COVID_START_DATE, "set"
-    ] = "before"
+    ] = "Before covid"
 
     features_and_targets["week_time"] = features_and_targets.index.strftime(
         "%A %I:%M %p"
