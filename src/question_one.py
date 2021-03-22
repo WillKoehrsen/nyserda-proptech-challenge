@@ -7,6 +7,9 @@ from src.feature_engineering import read_features_and_targets
 from src.modeling import make_test_predictions
 
 if __name__ == "__main__":
+    print(
+        f"{'#'*12}\tQuestion 1. What is your forecasted consumption across all 18 tenant usage meters for the 24 hours of 8/31/20 in 15 minute intervals (1728 predictions)?\t{'#'*12}"
+    )
 
     features_and_targets = read_features_and_targets()
 

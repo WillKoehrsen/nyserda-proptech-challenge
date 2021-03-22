@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 
 from src.constants import (
-    COLUMNS_TO_KEEP,
     DATASET_CSV_NAME,
     ELECTRIC_INTERVAL_DATA_CSV_NAME,
     FEATURES_TARGET_CSV_NAME,
@@ -288,7 +287,7 @@ def remove_extreme_values_from_interval_data(
     return new_series
 
 
-def engineer_features(columns_to_keep=COLUMNS_TO_KEEP):
+def create_features_and_targets():
     """
     Build the new features, remove outliers, and save dataset
     """

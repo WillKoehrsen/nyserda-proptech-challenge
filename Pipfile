@@ -19,6 +19,7 @@ isort = "*"
 psutil = "*"
 black = "==20.8b1"
 flake8 = "*"
+pre-commit = "*"
 
 [requires]
 python_version = "3.8"

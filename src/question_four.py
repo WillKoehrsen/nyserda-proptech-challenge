@@ -6,6 +6,9 @@ from src.feature_engineering import read_features_and_targets
 from src.modeling import make_test_predictions
 
 if __name__ == "__main__":
+    print(
+        f"{'#'*12}\tQuestion 4. What feature(s)/predictor(s) were most important in determining energy efficiency?\t{'#'*12}"
+    )
 
     features_and_targets = read_features_and_targets()
 

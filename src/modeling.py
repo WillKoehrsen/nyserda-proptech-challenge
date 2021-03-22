@@ -1,9 +1,7 @@
 import pandas as pd
 import plotly.express as px
-
 from plotly.offline import plot
 from sklearn.ensemble import RandomForestRegressor
-
 
 from src.constants import (
     COVID_START_DATE,
@@ -18,6 +16,24 @@ from src.constants import (
     TESTING_DATE,
     VALIDATION_DATE_COUNT,
 )
+from src.feature_engineering import (
+    create_dataset_from_csvs,
+    create_features_and_targets,
+)
+from src.parsing import read_raw_excel_data_to_csv
+
+
+def prepare_data():
+    """
+    Get the data ready for modeling and analysis.
+    """
+    print("Reading data from Excel to csvs")
+    read_raw_excel_data_to_csv()
+    print("Creating dataset from csvs")
+    create_dataset_from_csvs()
+    print("Creating features and targets")
+    create_features_and_targets()
+    print("Features and targets ready for modeling!")
 
 
 def train_and_predict(training_dataset, validation_dataset, features=DEFAULT_FEATURES):

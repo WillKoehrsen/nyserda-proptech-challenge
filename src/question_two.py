@@ -6,6 +6,10 @@ from src.modeling import (
 
 if __name__ == "__main__":
 
+    print(
+        f"{'#'*12}\tQuestion 2. How correlated are building-wide occupancy and tenant consumption?\t{'#'*12}"
+    )
+
     features_and_targets = read_features_and_targets()
 
     occupancy_consumption_correlation(features_and_targets)
