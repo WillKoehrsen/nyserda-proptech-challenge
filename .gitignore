@@ -10,6 +10,8 @@ __pycache__/
 *.html
 temp-plot.html
 
+problem_answers.md
+
 # Distribution / packaging
 .Python
 build/
